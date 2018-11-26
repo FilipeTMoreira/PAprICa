@@ -1,0 +1,315 @@
+#include <WiFiEspClient.h>
+#include <WiFiEsp.h>
+#include <WiFiEspUdp.h>
+#include <PubSubClient.h>
+#include "SoftwareSerial.h"
+#include <Wire.h> 
+#include "cactus_io_BME280_I2C.h" 
+
+
+#define WIFI_PINO 9
+#define WIFI_AP "nomde da rede wifi"
+#define WIFI_PASSWORD "password da rede wifi"
+#define TOKEN "token fornecido pela plataforma Thingsboard"
+
+#define PH_PINO 3
+
+//Moisture
+#define pino_sinal_analogico A1
+// UV
+#define pino_sinal_analogico0 A0
+// MQ2
+int pino_sinal_analogico1 = A2;
+
+
+
+// PH
+unsigned long int avgValue;  //Store the average value of the sensor feedback
+float b;
+int buf[10],temp;
+
+
+
+// Create BME280 object 
+BME280_I2C bme(0x76); // I2C using address 0x77 
+// or BME280_I2C bme(0x76); // I2C using address 0x76 
+
+
+char thingsboardServer[] = "demo.thingsboard.io";
+
+// Initialize the Ethernet client object
+WiFiEspClient espClient;
+
+PubSubClient client(espClient);
+
+SoftwareSerial soft(3, 2); // RX, TX
+
+int status = WL_IDLE_STATUS;
+unsigned long lastSend;
+
+bool WIFI_BOTAO_LIGADO;
+
+
+void setup() {
+  // initialize serial for debugging
+  Serial.begin(9600);
+
+/////////////////////////////////////////////////
+//pinmodes 
+/////////////////////////////////////////////////
+  pinMode(WIFI_PINO,INPUT_PULLUP);
+  pinMode(13,OUTPUT);  // LED VERMELHO 
+
+  
+/////////////////////////////////////////////////
+//WIFI 
+/////////////////////////////////////////////////
+Serial.println(F("[WIFI] inicializar wifi"));
+  if (digitalRead(WIFI_PINO)==HIGH){
+    WIFI_BOTAO_LIGADO=true;
+    InitWiFi();
+    client.setServer( thingsboardServer, 1883 );
+    lastSend = 0;
+  }else{
+    Serial.println(F("[WIFI] MODO DESATIVADO"));
+    WIFI_BOTAO_LIGADO=false;
+  }
+
+//////////////////////////////////////////////////
+//            BME
+//////////////////////////////////////////////////
+ 
+Serial.println(F("[BME] tentar inicializar"));
+for( int t=1;t<=3;t++){
+  Serial.print(F("      tentativa n "));  Serial.println(t);
+  bme.begin();
+  delay(250);
+  if (!bme.begin()) {
+    Serial.println(F("      falhou."));
+  }else{
+    Serial.println(F("      conectado com êxito."));
+    Serial.println(F("      calibrando "));  
+    bme.setTempCal(-2);// Temp was reading high so subtract 1 degree 
+    break;
+  }
+}
+Serial.println(F("      fim ")); 
+Serial.println("");
+  
+
+}
+
+void loop() {
+  
+  if (WIFI_BOTAO_LIGADO){
+      status = WiFi.status();
+      if ( status != WL_CONNECTED) {
+        while ( status != WL_CONNECTED) {
+          Serial.print("Attempting to connect to WPA SSID: ");
+          Serial.println(WIFI_AP);
+          // Connect to WPA/WPA2 network
+          status = WiFi.begin(WIFI_AP, WIFI_PASSWORD);
+          delay(500);
+        }
+        Serial.println("Connected to AP");
+      }
+        if ( !client.connected() ) {
+          reconnect();
+        }
+    }
+
+  if ( millis() - lastSend > 1000 ) { // Update and send only after 1 seconds
+    getAndSendTemperatureAndHumidityData();
+    lastSend = millis();
+  }
+
+  client.loop();
+}
+
+int getUvReading(){
+   // Measure light level
+  float sensor_reading = analogRead(A0);
+  float light = (sensor_reading/1024*100);
+  int result = 0;
+  // Display UV level
+  
+    if (light <= 227)
+  {
+     result = 0;
+  }
+  else if  (light > 227 && light <= 318)
+  {
+    result = 1;
+  }
+  else if (light > 318 && light <= 408)
+  {
+    result = 2;
+  }
+  else if (light > 408 && light <= 503)
+  {
+    result = 3;
+  }
+  else if (light > 503 && light <= 606)
+  {
+    result = 4;
+  }
+  else if (light > 606 && light <= 696)
+  {
+    result = 5;
+  }
+  else if (light > 696 && light <= 795)
+  {
+    result = 6;
+  }
+  else if (light > 795 && light <= 881)
+  {
+    result = 7;
+  }
+  else if (light > 881 && light <= 976)
+  {
+    result = 8;
+  }
+  else if (light > 976 && light <= 1079)
+  {
+    result = 9;
+  }
+  else if (light > 1079 && light <= 1170)
+  {
+     result = 10;
+  }
+  else if (light > 1170)
+  {
+    result = 11;
+
+}
+  return result;
+
+  }
+void getAndSendTemperatureAndHumidityData()
+{
+    //Le o valor do pino A1 do sensor
+  int humidade_solo = analogRead(pino_sinal_analogico);
+  int uv = getUvReading();
+  int gases = analogRead(pino_sinal_analogico1);
+
+  
+  Serial.println("A obter dados.");
+  
+  bme.readSensor();
+  
+  // Reading temperature or humidity takes about 250 milliseconds!
+  float h = bme.getHumidity();
+  // Read temperature as Celsius (the default)
+  float t = bme.getTemperature_C();
+  float p = bme.getPressure_MB();
+
+  // Check if any reads failed and exit early (to try again).
+  if (isnan(h) || isnan(t)|| isnan(p)) {
+    Serial.println("Erro ao obter dados do sensor BME!");
+    return;
+  }
+  
+  String temperature = String(t);
+  String humidity = String(h);
+  String pressure = String(p);
+
+  float ph=readPH(); 
+  // Check if ph reads failed and exit early (to try again).
+  if (isnan(ph)) {  
+    Serial.println("Erro ao obter dados do PH!");
+    return;
+  }
+  String phs = String(ph);
+
+  // Prepare a JSON payload string
+  String payload = "{";
+  payload += "\"Temp\":"; payload += temperature; payload += ",";
+  payload += "\"Humid\":"; payload += humidity; payload += ",";
+  payload += "\"Pressão\":"; payload += pressure; payload += ",";
+  payload += "\"Humidade Solo\":"; payload += humidade_solo; payload +=",";
+  payload += "\"UV\":"; payload += uv; payload +=",";
+  payload += "\"Fumo\":"; payload += gases; payload +=",";
+  payload += "\"Ph\":"; payload += phs;
+  payload += "}";
+
+  // Send payload
+  char attributes[100];
+  payload.toCharArray( attributes, 100 );
+  client.publish( "v1/devices/me/telemetry", attributes );
+  Serial.println( attributes );
+}
+
+float readPH(){
+  // PH
+  // ------------------------------
+  for(int i=0;i<10;i++)       //Get 10 sample value from the sensor for smooth the value
+  { 
+    buf[i]=analogRead(PH_PINO);
+    delay(10);
+  }
+  for(int i=0;i<9;i++)        //sort the analog from small to large
+  {
+    for(int j=i+1;j<10;j++)
+    {
+      if(buf[i]>buf[j])
+      {
+        temp=buf[i];
+        buf[i]=buf[j];
+        buf[j]=temp;
+      }
+    }
+  }
+  avgValue=0;
+  for(int i=2;i<8;i++)                      //take the average value of 6 center sample
+    avgValue+=buf[i];
+  float phValue=(float)avgValue*5.0/1024/6; //convert the analog into millivolt
+  phValue=3.5*phValue;                      //convert the millivolt into pH value
+  return phValue;
+  
+  //Serial.print("    pH:");  
+  //Serial.print(phValue,2);
+  //Serial.println(" ");
+}
+  
+
+void InitWiFi()
+{
+  // initialize serial for ESP module
+  soft.begin(9600);
+  // initialize ESP module
+  WiFi.init(&soft);
+  // check for the presence of the shield
+  if (WiFi.status() == WL_NO_SHIELD) {
+    Serial.println("WiFi shield not present");
+    // don't continue
+    while (true);
+  }
+
+  Serial.println("Connecting to AP ...");
+  // attempt to connect to WiFi network
+  while ( status != WL_CONNECTED) {
+    Serial.print("Attempting to connect to WPA SSID: ");
+    Serial.println(WIFI_AP);
+    // Connect to WPA/WPA2 network
+    status = WiFi.begin(WIFI_AP, WIFI_PASSWORD);
+    delay(500);
+  }
+  Serial.println("Connected to AP");
+}
+
+void reconnect() {
+  // Loop until we're reconnected
+  while (!client.connected()) {
+    Serial.print("Connecting to ThingsBoard node ...");
+    // Attempt to connect (clientId, username, password)
+    if ( client.connect("Arduino Uno Device", TOKEN, NULL) ) {
+      Serial.println( "[DONE]" );
+    } else {
+      Serial.print( "[FAILED] [ rc = " );
+      Serial.print( client.state() );
+      Serial.println( " : retrying in 5 seconds]" );
+      // Wait 5 seconds before retrying
+      delay( 5000 );
+    }
+  }
+}
