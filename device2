@@ -1,0 +1,176 @@
+///Dispositivo para obtenção de dados de humidade, temperatura e pressão atmosférica com o sensor BME280 e visualizar os dados na plataforma Thingsboard
+///Desenvolvido no âmbito do projeto PAprICa
+
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BME280.h>
+#include <SPI.h>
+#include <WiFiEspClient.h>
+#include <WiFiEsp.h>
+#include <WiFiEspUdp.h>
+#include <PubSubClient.h>
+#include "SoftwareSerial.h"
+ 
+#define WIFI_AP "escrever aqui o nome da rede"
+#define WIFI_PASSWORD "escrever aqui a palavra-chave da rede"
+ 
+#define TOKEN "escrever aqui o token gerado na plataforma"
+
+#define sensor_sinal_analogico0 A4
+#define sensor_sinal_analogico1 A5
+Adafruit_BME280 bme;
+ 
+ 
+char thingsboardServer[] = "demo.thingsboard.io";
+ 
+// Iniciar
+WiFiEspClient espClient;
+ 
+ 
+ 
+PubSubClient client(espClient);
+ 
+ 
+ 
+int status = WL_IDLE_STATUS;
+unsigned long lastSend;
+ 
+void setup() {
+  // iniciar 
+  Serial.begin(9600);
+  
+  Serial.println("BME280 Test");
+ 
+  if(!bme.begin(0x76))
+  {
+    Serial.println("Não consegue encontrar o sensor BME280, verifique as ligações!");
+    while (1)
+    {
+        yield();
+        delay(DELAY);
+    }
+  }
+  delay(STARTUP_DELAY);
+  Serial.setTimeout(1500);  //set the Timeout to 1500ms, longer than the data transmission periodic time of the sensor
+ }
+  client.setServer( thingsboardServer, 1883 );
+  lastSend = 0;
+}
+ 
+void loop() {
+  status = WiFi.status();
+  if ( status != WL_CONNECTED) {
+    while ( status != WL_CONNECTED) {
+      Serial.print("A tentar conectar a WPA SSID: ");
+      Serial.println(WIFI_AP);
+      // Conectar a WPA/WPA2 network
+      status = WiFi.begin(WIFI_AP, WIFI_PASSWORD);
+      delay(500);
+    }
+    Serial.println("Connected to AP");
+  }
+ 
+  if ( !client.connected() ) {
+    reconnect();
+  }
+ 
+  if ( millis() - lastSend > 1000 ) { // Update and send only after 1 seconds
+    getAndSendTemperatureAndHumidityData();
+    lastSend = millis();
+  }
+ 
+  client.loop();
+}
+ 
+void getAndSendTemperatureAndHumidityData()
+{
+  Serial.println("Collecting temperature data.");
+ 
+  // Ler a temperatura, humidade e pressão leva cerca de 250 milissegundos. 
+  float humidity = bme.readHumidity();
+  // Read temperature as Celsius (the default)
+  float temperature = bme.readTemperature();
+ 
+  float pressure = bme.readPressure() / 100.0;
+ 
+  //Verifica se alguma leitura falhou e repete.
+  if (isnan(h) || isnan(t)) {
+    Serial.println("Erro ao ler o sensor BME!");
+    return;
+  }
+ 
+  Serial.print("Humidity: ");
+  Serial.print(humidity);
+  Serial.print(" %\t");
+  Serial.print("Temperature: ");
+  Serial.print(temperature);
+  Serial.print(" *C ");
+  Serial.print("Pressure: ");
+  Serial.print(pressure);
+  Serial.print("hPa");
+ 
+  String temperature1 = String(temperature);
+  String humidity1 = String(humidity);
+  String pressure1 = String(pressure);
+ 
+ 
+  // Mensagens
+  Serial.print( "A enviar temperature, humidade e pressão: [" );
+  Serial.print( temperature1 ); Serial.print( "," );
+  Serial.print( humidity1 ); Serial.print( "," );
+  Serial.print( pressure1 );
+  Serial.print( "]   -> " );
+ 
+  // Preparar a JSON string
+  String payload = "{";
+  payload += "\"temperature\":"; payload += temperature1; payload += ",";
+  payload += "\"humidity\":"; payload += humidity1;  payload += ",";
+  payload += "\"pressure\":"; payload += pressure1;
+  payload += "}";
+ 
+  // Enviar
+  char attributes[100];
+  payload.toCharArray( attributes, 100 );
+  client.publish( "v1/devices/me/telemetry", attributes );
+  Serial.println( attributes );
+}
+ 
+void InitWiFi()
+{
+  // Iniciar o ESP module
+  soft.begin(9600);
+    WiFi.init(&soft);
+  // Verificar a presença do módulo
+  if (WiFi.status() == WL_NO_SHIELD) {
+    Serial.println("WiFi shield not present");
+    // não continuar
+    while (true);
+  }
+ 
+  Serial.println("Connecting to AP ...");
+  
+  while ( status != WL_CONNECTED) {
+    Serial.print("Attempting to connect to WPA SSID: ");
+    Serial.println(WIFI_AP);
+    // Connect to WPA/WPA2 network
+    status = WiFi.begin(WIFI_AP, WIFI_PASSWORD);
+    delay(500);
+  }
+  Serial.println("Connected to AP");
+}
+ 
+void reconnect() {
+  // Loop until we're reconnected
+  while (!client.connected()) {
+    Serial.print("Connecting to ThingsBoard node ...");
+    // Attempt to connect (clientId, username, password)
+    if ( client.connect("Stacja1", TOKEN, NULL) ) {
+      Serial.println( "[DONE]" );
+    } else {
+      Serial.print( "[FAILED] [ rc = " );
+      Serial.print( client.state() );
+      Serial.println( " : retrying in 5 seconds]" );
+      // Wait 5 seconds before retrying
+      delay( 5000 );
+    }
+  }
+}
