@@ -26,7 +26,7 @@ DHT dht(DHTPIN, DHTTYPE);
 
 PubSubClient client(espClient);
 
-SoftwareSerial soft(2, 3); // RX, TX
+SoftwareSerial soft(3, 2); // RX, TX
 
 int status = WL_IDLE_STATUS;
 unsigned long lastSend;
