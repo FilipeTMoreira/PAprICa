@@ -1,5 +1,4 @@
-//Desenvolvido no âmbito do projeto PAprICa. Dispositivo para obtenção de dados da humidade e 
-/temperatura do ar com o sensoer DHT22 e emissão de dados para a plataforma Thingsboard
+//Dispositivo para obtenção de dados da humidade e temperatura do ar com o sensoer DHT22 e emissão de dados para a plataforma Thingsboard
 
 #include "DHT.h"
 #include <WiFiEspClient.h>
